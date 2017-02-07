@@ -59,6 +59,12 @@ class Feed
             } else if ($e == (string)Engine::PHPTIMESERIES) {
                     require "Modules/feed/engine/PHPTimeSeries.php";    // Variable interval no averaging
                     $engines[$e] =  new PHPTimeSeries($this->settings['phptimeseries']);
+            } else if ($e == (string)Engine::DYNAMODB) {
+                    require "Modules/feed/engine/DynamoDB.php";         // DynamoDB
+                    $engines[$e] = new DynamoDB();
+            } else if ($e == (string)Engine::PHPFIWAPARTITIONS) {
+                    require "Modules/feed/engine/PHPFiwaPartitions.php";// Fixed interval with averaging and partitions.
+                    $engines[$e] = new PHPFiwaPartitions($this->settings['phpfiwapartitions']);
             } else if ($e == (string)Engine::MYSQLMEMORY) {
                     require_once "Modules/feed/engine/MysqlTimeSeries.php";  // Mysql engine
                     require "Modules/feed/engine/MysqlMemory.php";           // Mysql Memory engine
@@ -779,6 +785,15 @@ class Feed
         return $this->EngineClass(Engine::PHPFINA)->export($feedid,$start);
     }
 
+    // PHPDynamoDB specific functions that we need to make available to the controller
+    public function dynamodb_export($feedid,$start) {
+        return $this->EngineClass(Engine::DYNAMODB)->export($feedid,$start);
+    }
+
+    // FiwaPartitions specific functions that we need to make available to the controller
+    public function phpfiwapartitions_export($feedid,$start,$layer) {
+        return $this->EngineClass(Engine::PHPFIWAPARTITIONS)->export($feedid,$start,$layer);
+    }
 
     /*
      Processlist functions
