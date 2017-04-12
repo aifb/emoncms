@@ -1,13 +1,11 @@
 <?php
 
-/**
- * This class contains an implementation of new engine, called PHPFiwaPartitions. It is customized version of 'PHPFiwa', where data is
- * spread over partitions (files) instead of storing all data points in a single file. The main motivation behind implementing this
- * new engine was to make 'PHPFiwa' more efficient with respect to the huge data volumes which can contain large gaps.
- */
-class PHPFiwaPartitions
+// This timeseries engine implements:
+// Fixed Interval With Averaging
+
+class FiwaPartitions
 {
-    private $dir = "/var/lib/phpfiwapartitions/";
+    private $dir = "/var/lib/fiwaPartitions/";
     private $log;
     const WEEK_NPOINTS = 604800;
 
@@ -35,7 +33,7 @@ class PHPFiwaPartitions
         // Check to ensure we dont overwrite an existing feed
         if (!$meta = $this->get_meta($id))
         {
-            $this->log->info("PHPFIWAPartitions:create creating feed id=$id");
+            $this->log->info("PHPFIWA partitions:create creating feed id=$id");
             // Set initial feed meta data
             $meta = new stdClass();
             $meta->id = $id;
@@ -89,7 +87,7 @@ class PHPFiwaPartitions
      */
     public function post($id,$timestamp,$value,$arg=null)
     {
-        $this->log->info("PHPFiwaPartitions:post id=$id timestamp=$timestamp value=$value");
+        $this->log->info("PHPFiwa partitions:post id=$id timestamp=$timestamp value=$value");
 
         $id = (int) $id;
         $timestamp = (int) $timestamp;
@@ -100,7 +98,7 @@ class PHPFiwaPartitions
         $end = $now+(3600*48);         // 48 hours in future
 
         if ($timestamp<$start || $timestamp>$end) {
-            $this->log->warn("PHPFiwaPartitions:post timestamp out of range");
+            $this->log->warn("PHPFiwa partitions:post timestamp out of range");
             return false;
         }
 
@@ -108,31 +106,30 @@ class PHPFiwaPartitions
 
         // If meta data file does not exist then exit
         if (!$meta = $this->get_meta($id)) {
-            $this->log->warn("PHPFiwaPartitions:post failed to fetch meta id=$id");
+            $this->log->warn("PHPFiwa partitions:post failed to fetch meta id=$id");
             return false;
         }
 
         $timestamp = floor( $timestamp / $meta->interval[$layer] ) * $meta->interval[$layer]; // rounding.
-        $file_ind  = floor( $timestamp / (self::WEEK_NPOINTS * $meta->interval[$layer]) ) * $meta->interval[$layer];
-        //"$file_ind * 604800" = starting timestamp of the corresponding file.
-        $point_pos = 1 + floor( ($timestamp - $file_ind * self::WEEK_NPOINTS) / $meta->interval[$layer] );
+        $partID  = floor( $timestamp / (self::WEEK_NPOINTS * $meta->interval[$layer]) ) * $meta->interval[$layer];
+        $point_pos = 1 + ($timestamp - $partID * self::WEEK_NPOINTS) / $meta->interval[$layer] ;
 
 
-        $result = $this->update_layer($meta, $layer, $point_pos, $timestamp, $value, $file_ind);
+        $result = $this->update_layer($meta, $layer, $point_pos, $timestamp, $value, $partID);
 
 
     }
-
-    private function update_layer($meta, $layer, $point_pos, $timestamp, $value, $file_ind)
+    
+    private function update_layer($meta, $layer, $point_pos, $timestamp, $value, $partID)
     {
-        // file name of partition has the form: "<layer>_<file_index>", e.g. "1_10" -> layer 1, file_ind = 10.
-        // Partition begins with week_ind = file_ind, e.g. in above example, first timestamp in that partition would be 10*604800 (=6048000).
-        $file_name = $layer . "_" . $file_ind;
+        // file name of partition has the form: "<layer>_<partition id>", e.g. "1_10" -> layer 1, partID = 10.
+        // Partition begins with week_ind = partID, e.g. in above example, first timestamp in that partition would be 10*604800 (=6048000).
+        $file_name = $layer . "_" . $partID;
         $file_path = $this->dir . $meta->id . "/" . $file_name;
 
         $fh = fopen($file_path, 'c+');
         if (!$fh) {
-            $this->log->warn("PHPFiwa partitions:update_layer could not open data file layer $layer id=".$meta->id . " file_ind " . $file_ind);
+            $this->log->warn("PHPFiwa partitions:update_layer could not open data file layer $layer id=".$meta->id . " partID " . $partID);
             return false;
         }
 
@@ -148,11 +145,13 @@ class PHPFiwaPartitions
             fwrite($fh, pack("I", 0)); // the first element of the file is npoints in that file.
             fseek($fh, 0);
         }
-
+        
         // 1) Write padding
+
+        // Get number of points that are currently stored in the corresponding partition.
         $tmp = unpack("I", fread($fh, 4));
-        $last_point = $tmp[1];
-        $padding = ($point_pos - $last_point)-1;
+        $last_point_pos = $tmp[1];
+        $padding = ($point_pos - $last_point_pos)-1;
 
 
         if ($padding>0) {
@@ -169,7 +168,7 @@ class PHPFiwaPartitions
         if (!is_nan($value)) fwrite($fh,pack("f",$value)); else fwrite($fh,pack("f",NAN));
 
 
-        if ($point_pos > $last_point)
+        if ($point_pos > $last_point_pos)
         {
             $meta->npoints[$layer] = $point_pos;
             fseek($fh, 0); fwrite($fh, pack("I", $point_pos));
@@ -182,8 +181,8 @@ class PHPFiwaPartitions
         if( $layer < $meta->nlayers )
         {
             $timestamp_avl = floor($timestamp / $meta->interval[$layer]) * $meta->interval[$layer]; // rounding.
-            $file_ind_avl = floor( $timestamp_avl / (self::WEEK_NPOINTS * $meta->interval[$layer]) ) * $meta->interval[$layer];
-            $point_pos_avl = 1 + floor( ($timestamp_avl - $file_ind_avl * self::WEEK_NPOINTS) / $meta->interval[$layer] ); // "+1" because, pos = 0 contains number of points in that partition.
+            $partID_avl = floor( $timestamp_avl / (self::WEEK_NPOINTS * $meta->interval[$layer]) ) * $meta->interval[$layer];
+            $point_pos_avl = 1 + ($timestamp_avl - $partID_avl * self::WEEK_NPOINTS) / $meta->interval[$layer] ; // "+1" because, pos = 0 contains number of points in that partition.
 
             $point_in_avl = ($timestamp - $timestamp_avl) / $meta->interval[$layer-1];
             $first_point = $point_pos - $point_in_avl;
@@ -212,13 +211,13 @@ class PHPFiwaPartitions
             } else {
                 $average = NAN;
             }
-
-            $meta = $this->update_layer($meta,$layer,$point_pos_avl,$timestamp_avl,$average, $file_ind_avl);
+            
+            $meta = $this->update_layer($meta,$layer,$point_pos_avl,$timestamp_avl,$average, $partID_avl);  
         }
 
         return $meta;
     }
-
+    
     /**
      * Updates a data point in the feed
      *
@@ -228,7 +227,7 @@ class PHPFiwaPartitions
     */
     public function update($feedid,$time,$value)
     {
-
+    
     }
 
     /**
@@ -244,7 +243,7 @@ class PHPFiwaPartitions
     {
 
     }
-
+    
 
     public function get_data($feedid,$start,$end,$outinterval,$skipmissing,$limitinterval)
     {
@@ -252,9 +251,9 @@ class PHPFiwaPartitions
         $start = intval($start/1000);
         $end = intval($end/1000);
         $outinterval = (int) $outinterval;
-
-        if ($end < $start) return false;
-        if (!$meta = $this->get_meta($feedid)) return false;
+        
+        if ($end < $start) return array('success'=>false, 'message'=>'end must be greater than start');
+        if (!$meta = $this->get_meta($feedid)) return array('success'=>false, 'message'=>"Error reading meta data feedid=$id");
 
         if ($outinterval<$meta->interval[0]) $outinterval = $meta->interval[0];
 
@@ -266,31 +265,31 @@ class PHPFiwaPartitions
 
         // 2) find start and end partition, where iteration will take place.
         $denominator = self::WEEK_NPOINTS * $meta->interval[$layer];
-        $start_file_ind = floor( $start / $denominator ) * $meta->interval[$layer];
-        $end_file_ind = floor( $end / $denominator ) * $meta->interval[$layer];
-        $start_pos = 1 + ceil( ($start - $start_file_ind * self::WEEK_NPOINTS) / $meta->interval[$layer] );
-        $end_pos = 1 + ceil( ($end - $end_file_ind * self::WEEK_NPOINTS) / $meta->interval[$layer] );
+        $start_partID = floor( $start / $denominator ) * $meta->interval[$layer];
+        $end_partID = floor( $end / $denominator ) * $meta->interval[$layer];
+        $start_pos = 1 + ceil( ($start - $start_partID * self::WEEK_NPOINTS) / $meta->interval[$layer] );
+        $end_pos = 1 + ceil( ($end - $end_partID * self::WEEK_NPOINTS) / $meta->interval[$layer] );
         $data = array();
-        $current_ind = $start_file_ind;
+        $current_partID = $start_partID;
         $dp_in_range = 0;
         $first_point_pos = $start_pos - 1;
         $time_basis = $start;
         $end_time = $end;
 
-        while ($current_ind <= $end_file_ind) {
-            $file_path = $this->dir . $meta->id . "/" . $layer . "_" . $current_ind;
-            $cur_ind_start_time = $current_ind * self::WEEK_NPOINTS;
+        while ($current_partID <= $end_partID) {
+            $file_path = $this->dir . $meta->id . "/" . $layer . "_" . $current_partID;
+            $cur_ind_start_time = $current_partID * self::WEEK_NPOINTS;
             $data_exist = 1;
             $npoints = 0;
 
-            if (!file_exists($file_path) || filesize($file_path) <= 4) $data_exist = 0;
+            if (!file_exists($file_path) || filesize($file_path) <= 4) $data_exist = 0; 
 
 
             if (!$data_exist) {
                 if ($skipmissing == 1) {
-                    $current_ind += $meta->interval[$layer];
+                    $current_partID += $meta->interval[$layer];
                     $first_point_pos = 0;
-                    $time_basis = $current_ind * self::WEEK_NPOINTS;
+                    $time_basis = $current_partID * self::WEEK_NPOINTS;
                     continue;
                 }
             } else {
@@ -300,15 +299,15 @@ class PHPFiwaPartitions
             }
 
 
-            if ($end_file_ind == $start_file_ind) { // if this case holds, then outer loop will run only one time.
+            if ($end_partID == $start_partID) { // if this case holds, then outer loop will run only one time.
                 $dp_in_range = $end_pos - $start_pos;
-            } elseif ($current_ind == $start_file_ind) {
+            } elseif ($current_partID == $start_partID) {
                 $dp_in_range = $npoints - $start_pos + 1;
                 $end_time = $cur_ind_start_time + ($npoints - 1) * $meta->interval[$layer];
-            } elseif ($current_ind == $end_file_ind) {
+            } elseif ($current_partID == $end_partID) {
                 $dp_in_range = $end_pos - 1;
                 $end_time = $end;
-            } else { // load all partition data.
+            } else { // load all partition data. 
                 $dp_in_range = $npoints;
                 $end_time = $cur_ind_start_time + ($npoints - 1) * $meta->interval[$layer];
             }
@@ -319,9 +318,9 @@ class PHPFiwaPartitions
                 $layer_values = unpack("f*",fread($fh, 4*$dp_in_range));
                 fclose($fh);
             } elseif ($skipmissing == 1) {
-                $current_ind += $meta->interval[$layer];
+                $current_partID += $meta->interval[$layer];
                 $first_point_pos = 0;
-                $time_basis = $current_ind * self::WEEK_NPOINTS;
+                $time_basis = $current_partID * self::WEEK_NPOINTS;
                 continue;
             } else { //$skipmissing == 0.
                 $layer_values = array();
@@ -334,14 +333,14 @@ class PHPFiwaPartitions
                 $time1 = $time_basis + ($outinterval * ($i+1));
                 $pos0 = round(($time0 - $cur_ind_start_time) / $meta->interval[$layer]);
                 $pos1 = round(($time1 - $cur_ind_start_time) / $meta->interval[$layer]);
-
+                
                 $value = null;
-
+            
                 if ($pos0>=0) {
                     $p = $pos0 - $first_point_pos;
                     $point_sum = 0;
                     $points_in_sum = 0;
-
+                
                     while($p < $pos1 - $first_point_pos) {
                         if (isset($layer_values[$p+1]) && !is_nan($layer_values[$p+1])) {
                             $point_sum += $layer_values[$p+1];
@@ -349,12 +348,15 @@ class PHPFiwaPartitions
                         }
                         $p++;
                     }
-
+                
                     if ($points_in_sum) {
                         $value = $point_sum / $points_in_sum;
+                        if ($value !== null) {
+                            $value = (float)$value;
+                        }
                     }
                 }
-
+            
                 if ($value!==null || $skipmissing===0) {
                     $data[] = array($time0*1000,$value);
                 }
@@ -363,7 +365,7 @@ class PHPFiwaPartitions
             }
 
             $time_basis = $time0;
-            $current_ind += $meta->interval[$layer];
+            $current_partID += $meta->interval[$layer];
             $first_point_pos = 0;
             if (isset($fh) && is_resource($fh)) fclose($fh);
         }
@@ -372,6 +374,72 @@ class PHPFiwaPartitions
         return $data;
     }
 
+    public function get_data_DMY($id, $start, $end, $mode, $timezone) {
+
+        if ($timezone === 0) $timezone = "UTC";
+        if ( ($mode != 'daily') && ($mode != 'weekly') && ($mode != 'monthly') ) return false;
+        
+        $start = intval($start/1000);
+        $end = intval($end/1000);
+
+        $date = new DateTime();
+        $date->setTimezone(new DateTimeZone($timezone));
+        $date->setTimestamp($start);
+
+        $interval = 0;
+        if ($mode == "daily") {
+            $date->modify("midnight");
+            $interval = 86400;
+            $start = $date->getTimestamp();
+            return $this->get_data($id, $start*1000, $end*1000, $interval, 0, -1);
+        } else if ($mode == "weekly") {
+            $date->modify("this monday");
+            $interval = 604800;
+            $start = $date->getTimestamp();
+            return $this->get_data($id, $start*1000, $end*1000, $interval, 0, -1);
+        } 
+
+
+        // Handle monthly data separately from daily and weekly data, as the number of days the given month can contain may differ.  
+        // e.g. february has 28 days, march 31 days, etc.
+        // build monthly data indirectly, by first getting daily data and then post processing it to compute monthly data.
+        $date->modify("first day of this month");
+
+        $start = $date->getTimestamp();
+        $interval = 86400;
+        $daily_data =  $this->get_data($id, $start*1000, $end*1000, $interval, 0, -1);
+
+        $monthly_data = array();
+        $start = $daily_data[0][0];
+        $ind = 0;
+        $date->modify("+1 month");
+        $end = $data->getTimestamp()*1000;
+        $last_time = $daily_data[count($daily_data)-1][0];
+
+        // The variables 'start' and 'end' have in this context another meaning than in above use.
+        // Here they define the (unix)time borders of one month, between them we compute average value over daily data. 
+        while ($end <= $last_time) {
+            $avg = 0;
+            $sum = 0;
+            $n = 0;
+
+            while ($daily_data[$ind][0] < $end) {
+                $sum += $daily_data[$ind][1];
+                $n++;
+                $ind++;
+            }
+
+            $avg = $sum/$n;
+            $monthly_data[] = array($start, $avg);
+
+            $start = $end;
+            $date->modify("+1 month");
+            $end = $date->getTimestamp()*1000;
+        }
+
+        return $monthly_data;
+
+    }
 
     /**
      * Get the last value from a feed
@@ -384,27 +452,28 @@ class PHPFiwaPartitions
         if ( !is_dir($file_path) ) return false;
         if (!$meta = $this->get_meta($id)) return false;
 
-        $file_ind = $this->getFileInd($id, 0);
-        if ($file_ind < 0) return array('time'=>0, 'value'=>0);
+        $part_id = $this->getPartitionID($id, 0);
+        if ($part_id < 0) return false;
 
-        $fh = fopen($file_path."0_$file_ind", 'rb');
+        $fh = fopen($file_path."0_$part_id", 'rb');
         $tmp = unpack("I", fread($fh, 4));
-        $npoints = $tmp[1];
+        $npoints = $tmp[1];     
 
         if ($npoints > 0) {
             fseek($fh, 4 * $npoints);
             $d = fread($fh, 4);
-            fclose($fh);
+            fclose($fh); 
 
+            $value = null;
             $val = unpack("f",$d);
-            $time = $file_ind * self::WEEK_NPOINTS + $meta->interval[0] * ($npoints - 1);
-            return array('time'=>$time, 'value'=>$val[1]);
+            $time = $part_id * self::WEEK_NPOINTS + $meta->interval[0] * ($npoints - 1);
+            if (!is_nan($val[1])) $value = (float) $val[1];
+            return array('time'=>(int)$time, 'value'=>$value);
         } else {
-            return array('time'=>0, 'value'=>0);
-        }
-
+            return array('time'=>(int)0, 'value'=>(float)0);
+        }  
     }
-
+    
     public function export($id,$start,$layer)
     {
         $id = (int) $id;
@@ -431,18 +500,18 @@ class PHPFiwaPartitions
         // Write to output stream
         $fh = @fopen( 'php://output', 'w' );
 
-        $last_file_ind = $this->getFileInd($id, $layer);
-        if ($last_file_ind < 0) { //there is no any data posted in the feed yet.
+        $last_partID = $this->getPartitionID($id, $layer);
+        if ($last_partID < 0) { //there is no any data posted in the feed yet.
             fclose($fh);
-            exit;
-        }
-        $cur_ind = $this->getFileInd($id, $layer, 0);
+            exit; 
+        } 
+        $cur_partID = $this->getPartitionID($id, $layer, 0);
         $localsize = intval($start / 4) * 4;
 
         if ($localsize<4) $localsize = 4;
 
-        while ($current_ind <= $last_file_ind) {
-            $file_name = $layer . "_" . $current_ind;
+        while ($cur_partID <= $last_partID) {
+            $file_name = $layer . "_" . $cur_partID;
             $file_path = $this->dir . $meta->id . "/" . $file_name;
             $primary = fopen($file_path, 'rb');
 
@@ -462,14 +531,14 @@ class PHPFiwaPartitions
             }
 
 
-            $current_ind += $meta->interval[$layer];
+            $cur_partID += $meta->interval[$layer];
             $localsize = 4;
             fclose($primary);
         }
         fclose($fh);
         exit;
     }
-
+    
     public function delete($id)
     {
         $dir_path = $this->dir . $id . "/";
@@ -481,7 +550,7 @@ class PHPFiwaPartitions
         }
         rmdir($dir_path);
     }
-
+    
     public function get_feed_size($id)
     {
         $dir_path = $this->dir . "$id" . "/";
@@ -490,7 +559,7 @@ class PHPFiwaPartitions
 
         $size = 0;
         $size += filesize($dir_path . "$id.meta");
-        for ($i=0; $i < $meta->nlayers; $i++) {
+        for ($i=0; $i < $meta->nlayers; $i++) { 
             $size += 4 * $meta->npoints[$i];
         }
         return $size;
@@ -500,40 +569,44 @@ class PHPFiwaPartitions
     {
         $id = (int) $id;
         $file_path = $this->dir . "$id" . "/$id.meta";
-
+                
         if (!file_exists($file_path)) {
             return false;
         }
-
+        
         $meta = new stdClass();
         $meta->id = $id;
-
+        
         $metafile = fopen($file_path, 'rb');
 
         $tmp = unpack("I",fread($metafile,4));
-        $tmp = unpack("I",fread($metafile,4));
+        $tmp = unpack("I",fread($metafile,4)); 
         $meta->nlayers = $tmp[1];
-
+        
         if ($meta->nlayers<1 || $meta->nlayers>4) {
             $this->log->warn("PHPFiwa partitions:get_meta feed:$id nlayers out of range");
             return false;
         }
-
+        
         $meta->npoints = array();
         for ($i=0; $i<$meta->nlayers; $i++)
         {
-          $tmp = unpack("I",fread($metafile,4));
+          $tmp = unpack("I",fread($metafile,4)); 
           $meta->npoints[$i] = $tmp[1];
         }
-
+        
         $meta->interval = array();
         for ($i=0; $i<$meta->nlayers; $i++)
         {
-          $tmp = unpack("I",fread($metafile,4));
+          $tmp = unpack("I",fread($metafile,4)); 
           $meta->interval[$i] = $tmp[1];
         }
-
+        
         fclose($metafile);
+        
+        // for testing purpose.
+        $meta->start_time = 0; 
+
 
         return $meta;
     }
@@ -550,18 +623,18 @@ class PHPFiwaPartitions
         }
 
         $metafile = fopen($feed_dir . "/" . "$id.meta", 'wb');
-
+        
         if (!$metafile) {
             $this->log->warn("PHPFIWA partitions:create_meta could not open meta data file id=".$meta->id);
             return false;
         }
-
+        
         if (!flock($metafile, LOCK_EX)) {
             $this->log->warn("PHPFiwa partitions:create_meta meta file id=".$meta->id." is locked by another process");
             fclose($metafile);
             return false;
         }
-
+        
         fwrite($metafile,pack("I",$meta->id));
         fwrite($metafile,pack("I",$meta->nlayers));
         foreach ($meta->npoints as $n) fwrite($metafile,pack("I",$n));       // Legacy
@@ -569,11 +642,11 @@ class PHPFiwaPartitions
 
         fclose($metafile);
     }
-
+    
     private function write_padding($fh,$npoints,$npadding)
     {
         $tsdb_max_padding_block = 1024 * 1024;
-
+        
         // Padding amount too large
         if ($npadding>$tsdb_max_padding_block*2) {
             return false;
@@ -594,25 +667,25 @@ class PHPFiwaPartitions
         fseek($fh,4*($npoints+1));
 
         do {
-            if ($npadding < $pointsperblock)
-            {
+            if ($npadding < $pointsperblock) 
+            { 
                 $pointsperblock = $npadding;
-                $buf = '';
+                $buf = ''; 
                 for ($n = 0; $n < $pointsperblock; $n++) {
                     $buf .= pack("f",NAN);
                 }
             }
-
+            
             fwrite($fh, $buf);
             $npadding -= $pointsperblock;
-        } while ($npadding);
+        } while ($npadding); 
     }
-
+    
     public function recompile($meta)
     {
 
     }
-
+    
     public function csv_export($feedid,$start,$end,$outinterval,$usertimezone)
     {
         global $csv_decimal_places, $csv_decimal_place_separator, $csv_field_separator;
@@ -629,18 +702,18 @@ class PHPFiwaPartitions
         if (!$meta = $this->get_meta($feedid)) return false;
 
         if ($outinterval<$meta->interval[0]) $outinterval = $meta->interval[0];
-
+        
         $layer = 0;
         if ($meta->nlayers>1 && $outinterval >= $meta->interval[1]) $layer = 1;
         if ($meta->nlayers>2 && $outinterval >= $meta->interval[2]) $layer = 2;
         if ($meta->nlayers>3 && $outinterval >= $meta->interval[3]) $layer = 3;
-
+        
         // 2) find start and end partition, where iteration will take place.
         $denominator = self::WEEK_NPOINTS * $meta->interval[$layer];
-        $start_file_ind = floor( $start / $denominator ) * $meta->interval[$layer];
-        $end_file_ind = floor( $end / $denominator ) * $meta->interval[$layer];
-        $start_pos = 1 + ceil( ($start - $start_file_ind * self::WEEK_NPOINTS) / $meta->interval[$layer] );
-        $end_pos = 1 + ceil( ($end - $end_file_ind * self::WEEK_NPOINTS) / $meta->interval[$layer] );
+        $start_partID = floor( $start / $denominator ) * $meta->interval[$layer];
+        $end_partID = floor( $end / $denominator ) * $meta->interval[$layer];
+        $start_pos = 1 + ceil( ($start - $start_partID * self::WEEK_NPOINTS) / $meta->interval[$layer] );
+        $end_pos = 1 + ceil( ($end - $end_partID * self::WEEK_NPOINTS) / $meta->interval[$layer] );
 
         // There is no need for the browser to cache the output
         header("Cache-Control: no-cache, no-store, must-revalidate");
@@ -659,20 +732,20 @@ class PHPFiwaPartitions
 
         $data = array();
         $first_point_pos = $start_pos;
-        $current_ind = $start_file_ind;
+        $current_partID = $start_partID;
         $dp_in_range = 0;
         $first_point_pos = $start_pos - 1;
         $time_basis = $start;
         $end_time = $end;
-
-        while ($current_ind <= $end_file_ind) {
-            $file_path = $this->dir . $meta->id . "/" . $layer . "_" . $current_ind;
-            $cur_ind_start_time = $current_ind * self::WEEK_NPOINTS;
-
+        
+        while ($current_partID <= $end_partID) {
+            $file_path = $this->dir . $meta->id . "/" . $layer . "_" . $current_partID;
+            $cur_ind_start_time = $current_partID * self::WEEK_NPOINTS;
+            
             if (!file_exists($file_path) || filesize($file_path) <= 4) {
-                $current_ind += $meta->interval[$layer];
+                $current_partID += $meta->interval[$layer];
                 $first_point_pos = 0;
-                $time_basis = $current_ind * self::WEEK_NPOINTS;
+                $time_basis = $current_partID * self::WEEK_NPOINTS;
                 continue;
             }
 
@@ -680,15 +753,15 @@ class PHPFiwaPartitions
             $tmp = unpack("I", fread($fh, 4));
             $npoints = $tmp[1];
 
-            if ($end_file_ind == $start_file_ind) { // if this case holds, then outer loop will run only one time.
+            if ($end_partID == $start_partID) { // if this case holds, then outer loop will run only one time.
                 $dp_in_range = $end_pos - $start_pos;
-            } elseif ($current_ind == $start_file_ind) {
+            } elseif ($current_partID == $start_partID) {
                 $dp_in_range = $npoints - $start_pos + 1;
                 $end_time = $cur_ind_start_time + ($npoints - 1) * $meta->interval[$layer];
-            } elseif ($current_ind == $end_file_ind) {
+            } elseif ($current_partID == $end_partID) {
                 $dp_in_range = $end_pos - 1;
                 $end_time = $end;
-            } else { // load all partition data.
+            } else { // load all partition data. 
                 $dp_in_range = $npoints;
                 $end_time = $cur_ind_start_time + ($npoints - 1) * $meta->interval[$layer];
             }
@@ -696,11 +769,11 @@ class PHPFiwaPartitions
             if ($dp_in_range > 0) {
                 fseek($fh, ($first_point_pos + 1) * 4);
                 $layer_values = unpack("f*",fread($fh, 4*$dp_in_range));
-                fclose($fh);
+                fclose($fh);                
             } else {
-                $current_ind += $meta->interval[$layer];
+                $current_partID += $meta->interval[$layer];
                 $first_point_pos = 0;
-                $time_basis = $current_ind * self::WEEK_NPOINTS;
+                $time_basis = $current_partID * self::WEEK_NPOINTS;
                 continue;
             }
 
@@ -711,14 +784,14 @@ class PHPFiwaPartitions
                 $time1 = $time_basis + ($outinterval * ($i+1));
                 $pos0 = round(($time0 - $cur_ind_start_time) / $meta->interval[$layer]);
                 $pos1 = round(($time1 - $cur_ind_start_time) / $meta->interval[$layer]);
-
+                
                 $value = null;
-
+            
                 if ($pos0>=0) {
                     $p = $pos0 - $first_point_pos;
                     $point_sum = 0;
                     $points_in_sum = 0;
-
+                
                     while($p < $pos1 - $first_point_pos) {
                         if (isset($layer_values[$p+1]) && !is_nan($layer_values[$p+1])) {
                             $point_sum += $layer_values[$p+1];
@@ -726,7 +799,7 @@ class PHPFiwaPartitions
                         }
                         $p++;
                     }
-
+                
                     if ($points_in_sum) {
                         $value = $point_sum / $points_in_sum;
                         $timenew = $helperclass->getTimeZoneFormated($time0,$usertimezone);
@@ -735,10 +808,10 @@ class PHPFiwaPartitions
                 }
 
                 $i++;
-            }
+            }           
 
             $time_basis = $time0;
-            $current_ind += $meta->interval[$layer];
+            $current_partID += $meta->interval[$layer];
             $first_point_pos = 0;
             if (is_resource($fh)) fclose($fh);
 
@@ -750,14 +823,15 @@ class PHPFiwaPartitions
 
     /*
      * assert: there is an existing feed with the given id.
-     * assert: layer can be {0, 1, 2, 3}
-     * @returns '-1' if there is no any data posted in the feed.
-     * @param $t when '!=0', the greatest file index is returned, otherwise the smallest file
-     * index
+     * assert: allowed values for $layer {0, 1, 2, 3}
+     * @returns If the feed is not empty, returns the index of the first or last partition depending on what the value of $t is.
+     *          If the feed is empty, then '-1' is returned.  
+     * @param $t if the feed is not empty, the value of $t effects the output in the following way: 
+     *        if $t has the value other than '0' then the id of the last partition is returned, otherwise the id of the first partition.
      */
-    private function getFileInd($id, $layer, $t=1) {
+    private function getPartitionID($feedid, $layer, $t=1) {
 
-        $feed_dir_path = $this->dir . "$id" . "/";
+        $feed_dir_path = $this->dir . "$feedid" . "/";
         $iterator = new DirectoryIterator($feed_dir_path);
         $arr = array();
         $reg_exp = "/^" . $layer . "_/";
@@ -766,14 +840,40 @@ class PHPFiwaPartitions
                 $arr[] = intval(mb_substr($fileinfo->getFilename(), 2));
             }
         }
-
-        $file_ind = -1;
+        
+        $part_id = -1;
 
         if (count($arr) > 0) {
-            $file_ind = $t ? $arr[count($arr)-1] : $arr[0];
+            $part_id = $t ? $arr[count($arr)-1] : $arr[0];
         }
 
-        return $file_ind;
+        return $part_id;
     }
+
+
+
+
+
+    // Averaging functions ----------------------------------------------------------------------------
+    // These functions are here only for compability with the code in emoncms apps. The normal get_data
+    // functions of this engine return already average values. Therefore there is no need for postprocessing.
+
+
+    public function get_average($id, $start, $end, $outinterval) {
+        return $this->get_data($id, $start, $end, $outinterval, 0, 0);
+    }
+
+    public function get_DMY_average($id, $start, $end, $mode, $timezone) {
+        return $this->get_data_DMY($id, $start, $end, $mode, $timezone);
+    }
+
+
+
+
+
+
+
+
+
 
 }

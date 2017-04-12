@@ -58,12 +58,12 @@ class Feed
                     $engines[$e] = new RedisBuffer($this->redis,$this->settings['redisbuffer'],$this);
             } else if ($e == (string)Engine::PHPTIMESERIES) {
                     require "Modules/feed/engine/PHPTimeSeries.php";    // Variable interval no averaging
-                    $engines[$e] =  new PHPTimeSeries($this->settings['phptimeseries']);
-            } else if ($e == (string)Engine::DYNAMODB) {
-                    require "Modules/feed/engine/DynamoDB.php";         // DynamoDB
-                    $engines[$e] = new DynamoDB();
-            } else if ($e == (string)Engine::FIWAPARTITIONS) {
-                    require "Modules/feed/engine/FiwaPartitions.php";// Fixed interval with averaging and partitions.
+                    $engines[$e] =  new PHPTimeSeries($this->settings['phptimeseries']);     
+            } else if ($e == (string)Engine::PHPDYNAMODB) {
+                    require "Modules/feed/engine/PHPDynamoDB.php";
+                    $engines[$e] = new PHPDynamoDB();
+            } else if ($e == (string)Engine::FIWAPARTITIONS) {               // PHPFiwa with partitions.
+                    require "Modules/feed/engine/FiwaPartitions.php";
                     $engines[$e] = new FiwaPartitions($this->settings['fiwapartitions']);
             } else if ($e == (string)Engine::MYSQLMEMORY) {
                     require_once "Modules/feed/engine/MysqlTimeSeries.php";  // Mysql engine
@@ -123,6 +123,7 @@ class Feed
             $options = array();
             if ($engine==Engine::PHPFINA) $options['interval'] = (int) $options_in->interval;
             if ($engine==Engine::PHPFIWA) $options['interval'] = (int) $options_in->interval;
+            if ($engine==Engine::FIWAPARTITIONS) $options['interval'] = (int) $options_in->interval;
 
             $engineresult = false;
             if ($datatype==DataType::HISTOGRAM) {
@@ -443,8 +444,10 @@ class Feed
         return $lastvalue['value'];
     }
 
+
     public function get_data($feedid,$start,$end,$outinterval,$skipmissing,$limitinterval)
     {
+        
         $feedid = (int) $feedid;
         if ($end<=$start) return array('success'=>false, 'message'=>"Request end time before start time");
         if (!$this->exist($feedid)) return array('success'=>false, 'message'=>'Feed does not exist');
@@ -452,10 +455,8 @@ class Feed
         if ($engine == Engine::VIRTUALFEED) {
             $this->log->info("get_data() $feedid,$start,$end,$outinterval,$skipmissing,$limitinterval");
         }
-
         // Call to engine get_data
         $data = $this->EngineClass($engine)->get_data($feedid,$start,$end,$outinterval,$skipmissing,$limitinterval);
-
         if ($this->settings['redisbuffer']['enabled']) {
             // Add redisbuffer cache if available
             $bufferstart=end($data)[0];
@@ -485,10 +486,10 @@ class Feed
                 }
             }
         }
-
         return $data;
     }
     
+
     public function get_data_DMY($feedid,$start,$end,$mode)
     {
         $feedid = (int) $feedid;
@@ -496,7 +497,7 @@ class Feed
         if (!$this->exist($feedid)) return array('success'=>false, 'message'=>'Feed does not exist');
         $engine = $this->get_engine($feedid);
         
-        if ($engine != Engine::PHPFINA && $engine != Engine::PHPTIMESERIES) return array('success'=>false, 'message'=>"This request is only supported by PHPFina AND PHPTimeseries");
+        if ($engine != Engine::PHPFINA && $engine != Engine::PHPTIMESERIES && $engine != Engine::FIWAPARTITIONS) return array('success'=>false, 'message'=>"This request is only supported by PHPFina AND PHPTimeseries AND FiwaPartitions");
         
         // Call to engine get_data
         $userid = $this->get_field($feedid,"userid");
@@ -512,7 +513,7 @@ class Feed
         if (!$this->exist($feedid)) return array('success'=>false, 'message'=>'Feed does not exist');
         
         $engine = $this->get_engine($feedid);
-        if ($engine!=Engine::PHPFINA) return false;
+        if ($engine!=Engine::PHPFINA || $engine!=Engine::FIWAPARTITIONS) return false;
         
         return $this->EngineClass($engine)->get_average($feedid,$start,$end,$outinterval);
     }
@@ -523,7 +524,7 @@ class Feed
         if (!$this->exist($feedid)) return array('success'=>false, 'message'=>'Feed does not exist');
         
         $engine = $this->get_engine($feedid);
-        if ($engine!=Engine::PHPFINA) return false;
+        if ($engine!=Engine::PHPFINA || $engine!=Engine::FIWAPARTITIONS) return false;
 
         // Call to engine get_data
         $userid = $this->get_field($feedid,"userid");
@@ -790,14 +791,14 @@ class Feed
     public function phpfina_export($feedid,$start) {
         return $this->EngineClass(Engine::PHPFINA)->export($feedid,$start);
     }
-
+    
     // PHPDynamoDB specific functions that we need to make available to the controller
-    public function dynamodb_export($feedid,$start) {
-        return $this->EngineClass(Engine::DYNAMODB)->export($feedid,$start);
-    }
+    public function phpdynamodb_export($feedid,$start) {
+		return $this->EngineClass(Engine::PHPDYNAMODB)->export($feedid,$start);
+	}
 
     // FiwaPartitions specific functions that we need to make available to the controller
-    public function fiwapartitions_export($feedid,$start,$layer) {
+    public function fiwaPartition_export($feedid,$start,$layer) {
         return $this->EngineClass(Engine::FIWAPARTITIONS)->export($feedid,$start,$layer);
     }
 
