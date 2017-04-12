@@ -76,19 +76,19 @@ class VirtualFeed
         global $session,$user;
         require_once "Modules/process/process_model.php";
         $process = new Process($this->mysqli,$this->input,$this->feed,$user->get_timezone($session['userid']));
-        
-        
+
         if ($datatype==2) { //daily
             $start=$process->process__getstartday($now); // start of day
             $endslot = $start + 86400; // one day range
-            $opt_timearray = array('start' => $start, 'end' => $endslot, 'interval' => 86400, 'sourcetype' => "VIRTUALFEED", 'sourceid' => $feedid);
+            $opt_timearray = array('start' => $start, 'end' => $endslot, 'interval' => 86400, 'sourcetype' => ProcessOriginType::VIRTUALFEED, 'sourceid' => $feedid);
             $dataValue = $process->input($start, null, $processList, $opt_timearray); // execute processlist 
         } else {
-            $opt_timearray = array('sourcetype' => "VIRTUALFEED", 'sourceid' => $feedid);
+            $opt_timearray = array('sourcetype' => ProcessOriginType::VIRTUALFEED, 'sourceid' => $feedid);
             $dataValue = $process->input($now, null, $processList, $opt_timearray); // execute processlist 
         }
         //$this->log->info("lastvalue() feedid=$feedid dataValue=$dataValue");
-        return array('time'=>$now, 'value'=>$dataValue);
+        if ($dataValue !== null) $dataValue = (float) $dataValue ;
+        return array('time'=>(int)$now, 'value'=>$dataValue);  // datavalue can be float or null, dont cast!
     }
 
     // 1 - Calculates date slots for given start, end and interval. Representing about a pixel on the x axis of the graph for each time slot.
@@ -132,7 +132,7 @@ class VirtualFeed
         global $session,$user;
         require_once "Modules/process/process_model.php";
         $process = new Process($this->mysqli,$this->input,$this->feed,$user->get_timezone($session['userid']));
-        
+
         if ($dp > 0) 
         {
             $range = $end - $start; // windows duration in seconds
@@ -141,11 +141,12 @@ class VirtualFeed
             for ($i=0; $i<$dp; $i++)
             {
                 $tb = $start + intval(($i+1)*$td); //next end time
-                $opt_timearray = array('start' => $t, 'end' => $tb, 'interval' => $interval);
+                $opt_timearray = array('start' => $t, 'end' => $tb, 'interval' => $interval, 'sourcetype' => ProcessOriginType::VIRTUALFEED, 'sourceid'=>$dbinputs[$nodeid][$name]['id']);
                 $dataValue = $process->input($t, $dataValue, $processList, $opt_timearray); // execute processlist 
                     
                 if ($dataValue!=NULL || $skipmissing===0) { // Remove this to show white space gaps in graph
                     $time = $t * 1000;
+                    if ($dataValue !== null) $dataValue = (float) $dataValue ;
                     $data[] = array($time, $dataValue);
                 }
                 $t = $tb; // next start time
@@ -159,11 +160,12 @@ class VirtualFeed
              if ($endslot < $startslot) $endslot = $endslot + 86400; // one day range
              while ($startslot<$endslot)
              {
-                $opt_timearray = array('start' => $startslot, 'end' => $startslot+86400, 'interval' => $interval);
+                $opt_timearray = array('start' => $startslot, 'end' => $startslot+86400, 'interval' => $interval, 'sourcetype' => ProcessOriginType::VIRTUALFEED, 'sourceid'=>$dbinputs[$nodeid][$name]['id']);
                 $dataValue = $process->input($startslot, $dataValue, $processList, $opt_timearray); // execute processlist 
                     
                 if ($dataValue!=NULL || $skipmissing===0) { // Remove this to show white space gaps in graph
                     $time = $startslot * 1000;
+                    if ($dataValue !== null) $dataValue = (float) $dataValue ;
                     $data[] = array($time, $dataValue);
                 }
                 $startslot +=86400; // inc a day

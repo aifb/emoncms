@@ -52,6 +52,8 @@ class Process_ProcessList
     // Module required process configuration, return $list array
     public function process_list() {
         $list = array();
+        // 0=>Name | 1=>Arg type | 2=>function | 3=>No. of datafields if creating feed | 4=>Datatype | 5=>Group | 6=>Engines | 'requireredis'=>true | 'desc'=>Description | 'internalerror'=>true | 'internalerror_reason'=>true
+        $list[] = array(_("EXIT"), ProcessArg::NONE, "error_found", 0, DataType::UNDEFINED, "Hidden", 'desc'=>"<p>This was automaticaly added when a loop error was discovered on the processList or execution took too many steps to process.  Review the usage of GOTOs or decrease the number of items and delete this entry to resume execution.</p>", 'internalerror'=>true,'internalerror_reason'=>"HAS ERRORS",'internalerror_desc'=>'Processlist disabled due to errors found during execution.');
         return $list;
     }
 
@@ -103,7 +105,7 @@ class Process_ProcessList
         $list[19] = array(_("Power gained to kWh/d"),ProcessArg::FEEDID,"power_acc_to_kwhd",1,DataType::DAILY,"Deleted",array(Engine::PHPTIMESERIES), 'desc'=>"");
 
         // - look into implementation that doesnt need to store the ref feed
-        $list[20] = array(_("Total pulse count to pulse increment"),ProcessArg::FEEDID,"pulse_diff",1,DataType::REALTIME,"Pulse",array(Engine::PHPFINA,Engine::PHPTIMESERIES), 'desc'=>"");
+        $list[20] = array(_("Total pulse count to pulse increment"),ProcessArg::FEEDID,"pulse_diff",1,DataType::REALTIME,"Pulse",array(Engine::PHPFINA,Engine::PHPTIMESERIES), 'desc'=>"Returns the number of pulses incremented since the last update for a input that is a cumulative pulse count. i.e If the input updates from 23400 to 23410 the result will be an incremenet of 10.");
 
         // fixed works now with redis - look into state implementation without feed
         $list[21] = array(_("kWh to Power"),ProcessArg::FEEDID,"kwh_to_power",1,DataType::REALTIME,"Power & Energy",array(Engine::PHPFIWA,Engine::PHPFINA,Engine::PHPTIMESERIES), 'requireredis'=>true, 'desc'=>"Convert accumulating kWh to instantaneous power");
@@ -561,6 +563,7 @@ class Process_ProcessList
         global $redis;
         if (!$redis) return $value; // return if redis is not available
         
+        $power = 0;
         if ($redis->exists("process:kwhtopower:$feedid")) {
             $lastvalue = $redis->hmget("process:kwhtopower:$feedid",array('time','value'));
             $kwhinc = $value - $lastvalue['value'];
@@ -743,6 +746,11 @@ class Process_ProcessList
     
     public function goto_process($proc_no, $time, $value){
         $this->proc_goto = $proc_no - 2;
+        return $value;
+    }
+
+    public function error_found($arg, $time, $value){
+        $this->proc_goto = PHP_INT_MAX;
         return $value;
     }
 
