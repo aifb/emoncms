@@ -136,8 +136,8 @@ function feed_controller()
                         if ($route->action == "export") $result = $feed->phpfina_export($feedid,get('start'));
                     } elseif ($f['engine']==Engine::DYNAMODB) {
                         if ($route->action == "export") $result = $feed->dynamodb_export($feedid,get('start'));
-                    } elseif ($f['engine']==Engine::PHPFIWAPARTITIONS) {
-                        if ($route->action == "export") $result = $feed->phpfiwapartition_export($feedid,get('start'), get('layer'));
+                    } elseif ($f['engine']==Engine::FIWAPARTITIONS) {
+                        if ($route->action == "export") $result = $feed->fiwapartition_export($feedid,get('start'), get('layer'));
                     }
                 }
             }

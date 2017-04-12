@@ -42,7 +42,7 @@
             //,Engine::PHPFINA      // 5
             //,Engine::PHPFIWA      // 6
             //Engine::DYNAMODB      // 10
-            //Engine::PHPFIWAPARTITIONS // 11
+            //Engine::FIWAPARTITIONS // 11
         ),
 
         // Redis Low-write mode
@@ -65,8 +65,8 @@
         'phptimeseries'=>array(
             'datadir' => '/var/lib/phptimeseries/'
         ),
-        'phpfiwapartitions'=>array(
-            'datadir' => '/var/lib/phpfiwapartitions/'
+        'fiwapartitions'=>array(
+            'datadir' => '/var/lib/fiwaPartitions/'
         )
     );
 

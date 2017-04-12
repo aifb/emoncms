@@ -28,5 +28,5 @@
     const MYSQLMEMORY = 8;   // Mysql with MEMORY tables on RAM. All data is lost on shutdown 
     const REDISBUFFER = 9;   // (internal use only) Redis Read/Write buffer, for low write mode
     const DYNAMODB = 10;
-    const PHPFIWAPARTITIONS = 11;
+    const FIWAPARTITIONS = 11;
   }
