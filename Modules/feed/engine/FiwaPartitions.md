@@ -14,7 +14,7 @@ There is a root directory called *fiwaPartitions*, located in `/var/lib` (in lin
 
 In this context, week index is defined with respect to the unixtime. In the way that the unixtime is counting number of seconds that have elapsed since epoch (=1. January 1970, 00:00), the week index is counting the number of  weeks that have elapsed since epoch. E.g. `week index = 0` spans all unixtimes appearing in the period of from *1st January 1970 00:00* untill *8th January 1970 00:00*; the `week index = 1` spans all unixtimes appearing in the period of from *8th January 1970 00:00* till *15th January 1970 00:00*, etc. With that in mind, each week index spans an interval of unixtimes, `[first_unixtime_in_that_week, last_unixtime_in_that_week]`, of size 604800 (=number of seconds within one week). Given an unix timestamp, the week index can be derived by computing
 
-   week index = floor( timestamp / 604800 )
+      week index = floor( timestamp / 604800 )
 
 ## Number of Weeks that a single Partition can span
 
